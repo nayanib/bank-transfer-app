@@ -27,5 +27,10 @@ public class DataLoader implements CommandLineRunner {
             ));
             // total money = LKR 85,000.00
         }
+        // bank account that receives the 1% transfer fee
+        if (customerRepository.countAccounts("999999") == 0) {
+            customerRepository.save(new Customer("Bank Fee Account", "fees@bank.example.com", "999999",
+                    new BigDecimal("0.00")));
+        }
     }
 }

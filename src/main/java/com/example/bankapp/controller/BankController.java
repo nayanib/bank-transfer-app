@@ -17,6 +17,8 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.servlet.mvc.support.RedirectAttributes;
 
+import java.math.BigDecimal;
+
 @Controller
 @RequiredArgsConstructor
 public class BankController {
@@ -80,7 +82,54 @@ public class BankController {
     public String history(@PathVariable String accountNumber, Model model) {
         model.addAttribute("customer", bankService.getCustomer(accountNumber));
         model.addAttribute("transactions", bankService.getHistory(accountNumber));
+        model.addAttribute("totalSent", bankService.getTotalSent(accountNumber));
         return "history";
+    }
+
+    // Successful transfers above a minimum amount, e.g. /large-transfers?min=10000
+    @GetMapping("/large-transfers")
+    public String largeTransfers(@RequestParam(defaultValue = "10000") BigDecimal min, Model model) {
+        model.addAttribute("min", min);
+        model.addAttribute("transfers", bankService.getLargeTransfers(min));
+        return "large-transfers";
+    }
+
+    // Deposit form
+    @GetMapping("/deposit")
+    public String depositPage(Model model) {
+        model.addAttribute("customers", bankService.getAllCustomers());
+        return "deposit";
+    }
+
+    @PostMapping("/deposit")
+    public String deposit(@RequestParam String accountNumber, @RequestParam BigDecimal amount,
+                          RedirectAttributes redirect) {
+        try {
+            bankService.deposit(accountNumber, amount);
+            redirect.addFlashAttribute("success", "Deposited LKR " + amount + " to account " + accountNumber);
+        } catch (Exception e) {
+            redirect.addFlashAttribute("error", "Deposit failed: " + e.getMessage());
+        }
+        return "redirect:/deposit";
+    }
+
+    // Withdraw form
+    @GetMapping("/withdraw")
+    public String withdrawPage(Model model) {
+        model.addAttribute("customers", bankService.getAllCustomers());
+        return "withdraw";
+    }
+
+    @PostMapping("/withdraw")
+    public String withdraw(@RequestParam String accountNumber, @RequestParam BigDecimal amount,
+                           RedirectAttributes redirect) {
+        try {
+            bankService.withdraw(accountNumber, amount);
+            redirect.addFlashAttribute("success", "Withdrew LKR " + amount + " from account " + accountNumber);
+        } catch (Exception e) {
+            redirect.addFlashAttribute("error", "Withdrawal failed: " + e.getMessage());
+        }
+        return "redirect:/withdraw";
     }
 
     // Puts everything the dashboard page needs into the model
