@@ -13,6 +13,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.List;
 
 @Service
@@ -22,6 +23,10 @@ public class BankService {
 
     private final CustomerRepository customerRepository;
     private final BankTransactionRepository transactionRepository;
+
+    // bank account that receives the 1% transfer fee
+    public static final String BANK_ACCOUNT = "999999";
+    private static final BigDecimal FEE_RATE = new BigDecimal("0.01");
 
     // ---------- Reading data (read-only) ----------
 
@@ -64,6 +69,14 @@ public class BankService {
         return transactionRepository.countByStatus(status);
     }
 
+    public List<BankTransaction> getLargeTransfers(BigDecimal min) {
+        return transactionRepository.findLargeTransfers(min, TransactionStatus.SUCCESS);
+    }
+
+    public BigDecimal getTotalSent(String accountNumber) {
+        return transactionRepository.getTotalSent(accountNumber, TransactionStatus.SUCCESS);
+    }
+
     // ---------- Saving data (read-write) ----------
 
     @Transactional
@@ -100,8 +113,11 @@ public class BankService {
             throw new AccountNotFoundException(toAccount);
         }
 
-        // Step 2: take the money from the sender (0 rows updated = balance too low)
-        int updated = customerRepository.debit(fromAccount, amount);
+        // 1% fee, rounded to 2 decimal places
+        BigDecimal fee = amount.multiply(FEE_RATE).setScale(2, RoundingMode.HALF_UP);
+
+        // Step 2: take the money + fee from the sender (0 rows updated = balance too low)
+        int updated = customerRepository.debit(fromAccount, amount.add(fee));
         if (updated == 0) {
             throw new InsufficientBalanceException(fromAccount);
         }
@@ -111,12 +127,47 @@ public class BankService {
             throw new BankException("Simulated system failure after the withdrawal");
         }
 
-        // Step 4: give the money to the receiver
+        // Step 4: give the money to the receiver and the fee to the bank account
         customerRepository.credit(toAccount, amount);
+        customerRepository.credit(BANK_ACCOUNT, fee);
 
-        // Step 5: save a SUCCESS record
+        // Step 5: save SUCCESS records for the transfer and the fee
+        transactionRepository.save(new BankTransaction(fromAccount, BANK_ACCOUNT, fee,
+                TransactionStatus.SUCCESS, "Transfer fee (1%)"));
         BankTransaction record = new BankTransaction(fromAccount, toAccount, amount,
                 TransactionStatus.SUCCESS, "Transfer completed");
         return transactionRepository.save(record);
+    }
+
+    // Deposit: add money to one account (uses credit)
+    @Transactional(rollbackFor = Exception.class)
+    public void deposit(String accountNumber, BigDecimal amount) {
+        checkAmount(amount);
+        if (customerRepository.countAccounts(accountNumber) == 0) {
+            throw new AccountNotFoundException(accountNumber);
+        }
+        customerRepository.credit(accountNumber, amount);
+        transactionRepository.save(new BankTransaction(null, accountNumber, amount,
+                TransactionStatus.SUCCESS, "Deposit"));
+    }
+
+    // Withdraw: take money from one account (uses debit)
+    @Transactional(rollbackFor = Exception.class)
+    public void withdraw(String accountNumber, BigDecimal amount) {
+        checkAmount(amount);
+        if (customerRepository.countAccounts(accountNumber) == 0) {
+            throw new AccountNotFoundException(accountNumber);
+        }
+        if (customerRepository.debit(accountNumber, amount) == 0) {
+            throw new InsufficientBalanceException(accountNumber);
+        }
+        transactionRepository.save(new BankTransaction(accountNumber, null, amount,
+                TransactionStatus.SUCCESS, "Withdrawal"));
+    }
+
+    private void checkAmount(BigDecimal amount) {
+        if (amount == null || amount.compareTo(BigDecimal.ZERO) <= 0) {
+            throw new BankException("Amount must be greater than 0");
+        }
     }
 }
